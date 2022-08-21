@@ -8,8 +8,10 @@ calculating the current wheel angle from the rotary encoder's output.
 
 The overall architecture consits of a python server (running on the same computer as AgOpenGPS) 
 communicating via UDP traffic with AgIO on the one side 
-and via an USB connection using the Phidgets SDK with the motor controller. 
+and via an USB connection using the [Python Phidgets SDK](https://www.phidgets.com/docs/Language_-_Python#Quick_Downloads) with the motor controller. 
 
+# Warning
+Please note that this project is just a proof of concept and may fail / crash suddenly. 
 
 # Similar / inspring Projects
 - https://github.com/salmiac/pi-steer/

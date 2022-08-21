@@ -14,34 +14,39 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(na
 OVERCURRENT_LIMIT = 0.4 # limit max amps the motor may draw
 MAX_STEERING_ANGLE = 45.0 # max angle you can turn the wheels
 
+# Parameters for PI controller
+kp = 0.01
+ki = 0.001
+
 
 class MotorController:
 
     def __init__(self):
         self.logger = logging.getLogger(name="MotorController")
 
-        #Create your Phidget channels
+        # Create your Phidget channels
         self.motor = DCMotor()
         self.supply_voltage_sensor = VoltageInput()
         self.current_sensor = CurrentInput()
         self.encoder = Encoder()
 
-        #Set addressing parameters to specify which channel to open (if any)
+        # Set addressing parameters to specify which channel to open (if any)
         self.supply_voltage_sensor.setChannel(2)
 
-        #Assign any event handlers you need before calling open so that no events are missed.
+        # Assign any event handlers you need before calling open so that no events are missed.
         self.motor.setOnAttachHandler(self.motor_attached)
         self.motor.setOnDetachHandler(self.motor_detached)
         self.supply_voltage_sensor.setOnVoltageChangeHandler(self.on_voltage_change)
         self.current_sensor.setOnCurrentChangeHandler(self.on_current_change)
         self.encoder.setOnAttachHandler(self.encoder_attach)
 
-        #Open your Phidgets and wait for attachment
+        # Open your Phidgets and wait for attachment
         self.motor.openWaitForAttachment(2000)
         self.supply_voltage_sensor.openWaitForAttachment(2000)
         self.current_sensor.openWaitForAttachment(2000)
         self.encoder.openWaitForAttachment(2000)
 
+        # Steering control
         self.target_angle: float = 0.0
         self.running = threading.Event()
         self.running.set()
@@ -54,6 +59,7 @@ class MotorController:
 
     def shutdown(self):
         self.logger.info("Stopping control loop")
+        self.steering_active.clear()
         self.running.clear()
         self.control_loop_thread.join(1)
 
@@ -63,7 +69,7 @@ class MotorController:
         self.current_sensor.close()
         self.encoder.close()
 
-    def motor_attached(self, self2):
+    def motor_attached(self, _):
         self.logger.info("Motor attached!")
         self.motor.setAcceleration(5.0)
         self.motor.setDataRate(50) # set up to 125.0 Hz
@@ -72,17 +78,17 @@ class MotorController:
     def encoder_attach(self, _):
         self.encoder.setDataRate(100) # set up to 125.0 Hz
     
-    def motor_detached(self, self2):
+    def motor_detached(self, _):
         self.logger.warning("Motor detached!")
-        self.steering_active.clear()
+        self.shutdown()
     
     def error_handler(self, _, code, description):
         self.logger.error("Error with Code '%s' occured. Description: %s", ErrorEventCode.getName(code), str(description))
 
-    def on_voltage_change(self, self2, voltage):
+    def on_voltage_change(self, _, voltage):
         self.logger.debug("Voltage: " + str(voltage))
 
-    def on_current_change(self, self2, current: float):
+    def on_current_change(self, _, current: float):
         self.logger.debug("Current: " + str(current))
 
         if current > OVERCURRENT_LIMIT:
@@ -96,7 +102,11 @@ class MotorController:
     def delta_angle(self, target_angle: float) -> float:
         return self.current_angle() - target_angle
 
-    def calibrate(self):
+    def calibrate_center(self):
+        """Perform a user guided calibration of the steering wheel.
+        In order to know the number of Encoder ticks that correspond to the full range of the steering wheel
+        we need to capture this manually.
+        """
 
         self.motor.setTargetVelocity(0.0)
         self.motor.setTargetBrakingStrength(0.0)
@@ -116,57 +126,22 @@ class MotorController:
         start_time = time.time()
         self.steering_active.set()
         
-        # wait till we are settled at almost the center or timeout
+        # wait till we are settled at almost the center or timeout of 5 seconds
         while self.delta_angle(0) > 2 or abs(self.motor.getVelocity()) > 0.1 or \
               time.time() - start_time < 5:
             continue
 
         self.steering_active.clear()
-
-        # error = self.delta_angle(0)
-        # error_sum = 0
-        # stable_iterations = 0
-        # last_error = error
-        # while abs(error) > 5 or \
-        #       abs(error_sum) > 50 or \
-        #       stable_iterations < 5:
-        #     start_time = time.time()
-        #     kp = 0.01
-        #     ki = 0.001
-
-        #     # reset error on sign flip
-        #     if error * last_error > 0:
-        #         error_sum += error
-        #     else:
-        #         error_sum = 0
-
-        #     if last_error == error:
-        #         stable_iterations += 1
-        #     else:
-        #         stable_iterations = 0
-
-        #     velocity = (-1) * (kp * error + ki * error_sum)
-
-        #     # limit to -1 to +1
-        #     velocity = min(velocity, self.motor.getMaxVelocity())
-        #     velocity = max(velocity, -self.motor.getMaxVelocity())
-
-
-        #     self.logger.info("Steering to center with Motor velocity of %.3f and current error %.2f° | error sum %.2f", velocity, error, error_sum)
-        #     self.motor.setTargetVelocity(velocity)
-
-        #     last_error = error
-        #     error = self.delta_angle(0)
-
-        #     # limit frequency
-        #     exec_time = time.time() - start_time
-        #     time.sleep(max(0, 1/50 - exec_time))
-        #     self.logger.debug("Control loop execution time %f", exec_time)
         self.motor.setTargetVelocity(0)
 
         self.logger.info("Motor centered with final error of %.2f", self.delta_angle(0))
 
     def control_loop(self) -> None:
+        """ Control the motors velocity using a PI controller
+        Given the target angle (self.target_angle) the controller 
+        constantly updates the motor's velocity to minimize the error aka. delta_angle.
+        """
+        
         error = last_error = error_sum = 0.0
         while self.running.is_set():
             if not self.steering_active.is_set():
@@ -174,10 +149,8 @@ class MotorController:
                 continue
 
             start_time = time.time()
-            kp = 0.01
-            ki = 0.001
 
-            # reset error on sign flip
+            # reset integral error on sign flip
             if error * last_error > 0:
                 error_sum += error
             else:
@@ -201,7 +174,7 @@ class MotorController:
             self.logger.debug("Control loop execution time %f", exec_time)
 
 
-    def start_steering(self):
+    def start_manual_input_steering(self):
         self.target_angle = 0.0
         self.steering_active.set()
 
@@ -232,9 +205,9 @@ class MotorController:
 
 try:
     mc = MotorController()
-    mc.calibrate()
+    mc.calibrate_center()
     time.sleep(2)
-    mc.start_steering()
+    mc.start_manual_input_steering()
 except Exception:
     logging.exception("Unhandled Exeception occured")
 finally:
