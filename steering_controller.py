@@ -1,16 +1,16 @@
+import time
+import logging
+import threading
+
 import Phidget22.Phidget
 from Phidget22.ErrorEventCode import ErrorEventCode
 from Phidget22.Devices.DCMotor import DCMotor
 from Phidget22.Devices.VoltageInput import VoltageInput
 from Phidget22.Devices.CurrentInput import CurrentInput
 from Phidget22.Devices.Encoder import Encoder
-import time
-from functools import partial
-import logging
-import threading
-
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(name)-15s %(message)s')
+
 OVERCURRENT_LIMIT = 0.4 # limit max amps the motor may draw
 MAX_STEERING_ANGLE = 45.0 # max angle you can turn the wheels
 
@@ -20,6 +20,8 @@ ki = 0.001
 
 
 class MotorController:
+    """ Control logic for the steering wheel by interfacing the Phidgets Motor Controller
+    """
 
     def __init__(self):
         self.logger = logging.getLogger(name="MotorController")
@@ -202,14 +204,14 @@ class MotorController:
         self.motor.setTargetVelocity(0)
         self.motor.setTargetBrakingStrength(0)
 
-
-try:
-    mc = MotorController()
-    mc.calibrate_center()
-    time.sleep(2)
-    mc.start_manual_input_steering()
-except Exception:
-    logging.exception("Unhandled Exeception occured")
-finally:
-    logging.info("Shutting down")
-    mc.shutdown()
+if __name__ == '__main__':
+    try:
+        mc = MotorController()
+        mc.calibrate_center()
+        time.sleep(2)
+        mc.start_manual_input_steering()
+    except Exception:
+        logging.exception("Unhandled Exeception occured")
+    finally:
+        logging.info("Shutting down")
+        mc.shutdown()
