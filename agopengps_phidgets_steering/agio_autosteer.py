@@ -1,11 +1,10 @@
 import logging
 import time
 import socket
-from typing import List
 import struct
 import threading
 
-from steering_controller import MotorController
+from agopengps_phidgets_steering.steering_controller import MotorController
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(name)-15s %(message)s')
@@ -57,10 +56,10 @@ class AgIOAutsteer:
                     (data, address) = self.server.recvfrom(1024)
                     if data[0] == 0x80 and data[1] == 0x81:
                         self.decode_data(data)
-            except socket.error as e:
-                self.logger.error("Error reading UDP data from AgIO", exc_info=e)
             except socket.timeout as e:
                 self.logger.error("Timeout error reading UDP data from AgIO", exc_info=e)
+            except socket.error as e:
+                self.logger.error("Error reading UDP data from AgIO", exc_info=e)
     
     def decode_data(self, data) -> None:
         data_source = data[2]

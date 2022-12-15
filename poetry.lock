@@ -1,0 +1,18 @@
+[[package]]
+name = "phidget22"
+version = "1.10.20220622"
+description = "Phidget22 Python wrapper library"
+category = "main"
+optional = false
+python-versions = "*"
+
+[metadata]
+lock-version = "1.1"
+python-versions = "^3.10"
+content-hash = "509f7ef28d23fb80c1dd87bf163a5019fdc1180884515ce48fd2732ab4e1aa82"
+
+[metadata.files]
+phidget22 = [
+    {file = "Phidget22-1.10.20220622-py3-none-any.whl", hash = "sha256:a932d959d64cc705402bcfe55bcf3ac142f9ab6a2e9b8561e2a6418ad402365c"},
+    {file = "Phidget22-1.10.20220622.tar.gz", hash = "sha256:27d4289445175640f3db54124b367048526c08eb2a29300e3ed34c67c0ba650a"},
+]

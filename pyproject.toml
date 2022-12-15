@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "agopengps-phidgets-steering"
+version = "0.1.0"
+description = ""
+authors = ["Tom Stein <dev@tomstein.me>"]
+readme = "README.md"
+packages = [{include = "agopengps_phidgets_steering"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+phidget22 = "1.10.20220622"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

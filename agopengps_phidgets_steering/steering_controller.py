@@ -2,7 +2,6 @@ import time
 import logging
 import threading
 
-import Phidget22.Phidget
 from Phidget22.ErrorEventCode import ErrorEventCode
 from Phidget22.Devices.DCMotor import DCMotor
 from Phidget22.Devices.VoltageInput import VoltageInput
