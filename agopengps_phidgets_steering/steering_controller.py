@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(na
 
 OVERCURRENT_LIMIT = 0.4 # limit max current in ampere the motor may draw
 MAX_STEERING_ANGLE = 45.0 # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
-INVERT_MOTOR_DIR = False # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
+INVERT_MOTOR_DIR = True # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
 CONTORL_LOOP_FREQUENCY = 50 # Configure the loop frequency of the PI controller in Hz
 
 # Parameters for PI controller
@@ -68,6 +68,14 @@ class SteeringController:
 
         if self.motor.getIsOpen():
             self.logger.info("Stopping motor")
+            self.motor.setTargetVelocity(0)
+            self.motor.setTargetBrakingStrength(0)
+
+        # wait some time for control loops to terminate
+        time.sleep(0.2)
+
+        # ensure the motor is stopped
+        if self.motor.getIsOpen():
             self.motor.setTargetVelocity(0)
             self.motor.setTargetBrakingStrength(0)
 
@@ -129,9 +137,6 @@ class SteeringController:
         """
         angle = MAX_STEERING_ANGLE * self.encoder.getPosition() / (self.steering_wheel_full_range//2)
 
-        # if INVERT_MOTOR_DIR:
-        #     angle *= -1
-
         return angle
 
 
@@ -142,6 +147,7 @@ class SteeringController:
         """Perform a user guided calibration of the steering wheel.
         In order to know the number of Encoder ticks that correspond to the full range of the steering wheel
         we need to capture this manually.
+
 
         0                                   should be the left endpoint of the steering wheel
         self.steering_wheel_full_range/2    should be the center of the steering wheel
@@ -157,8 +163,10 @@ class SteeringController:
 
         self.steering_wheel_full_range: int = self.encoder.getPosition()
         if INVERT_MOTOR_DIR:
+            # we expect counter-clockwise rotation of the motor
             assert self.steering_wheel_full_range < 0, "expected full steering range to be negative"
         else:
+            # we expect clockwise rotation of the motor
             assert self.steering_wheel_full_range > 0, "expected full steering range to be positive"
         self.logger.info("Total steering wheel range %d", self.steering_wheel_full_range)
 
@@ -203,11 +211,14 @@ class SteeringController:
 
             velocity = (-1) * (kp * error + ki * error_sum)
 
+            if INVERT_MOTOR_DIR:
+                velocity *= -1
+
             # limit to max velocity (i.e. -1 to +1)
             velocity = min(velocity, self.motor.getMaxVelocity())
             velocity = max(velocity, -self.motor.getMaxVelocity())
 
-            self.logger.info("Steering to %.3f° with Motor velocity of %.3f and current error %.2f° | error sum %.2f", self.target_angle, velocity, error, error_sum)
+            self.logger.info("Steering from %.2f° to %.2f° with Motor velocity of %.3f and current error %.2f° | error sum %.2f", self.current_angle(), self.target_angle, velocity, error, error_sum)
             self.motor.setTargetVelocity(velocity)
 
             last_error = error
