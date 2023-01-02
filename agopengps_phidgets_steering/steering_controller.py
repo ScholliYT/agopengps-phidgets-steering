@@ -18,7 +18,7 @@ kp = 0.01
 ki = 0.001
 
 
-class MotorController:
+class SteeringController:
     """ Control logic for the steering wheel by interfacing the Phidgets Motor Controller
     """
 
@@ -205,7 +205,7 @@ class MotorController:
 
 if __name__ == '__main__':
     try:
-        mc = MotorController()
+        mc = SteeringController()
         mc.calibrate_center()
         time.sleep(2)
         mc.start_manual_input_steering()

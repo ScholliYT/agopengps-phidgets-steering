@@ -4,7 +4,7 @@ import socket
 import struct
 import threading
 
-from agopengps_phidgets_steering.steering_controller import MotorController
+from agopengps_phidgets_steering.steering_controller import SteeringController
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(name)-15s %(message)s')
@@ -14,7 +14,7 @@ PGN_AUTOSTEER_DATA = 0xfe
 
 class AgIOAutsteer:
 
-    def __init__(self, mc: MotorController):
+    def __init__(self, mc: SteeringController):
         self.logger = logging.getLogger(name="AgIOAutsteer")
 
         assert mc.steering_wheel_full_range > 0, "Looks like the steering wheel range is not calibrated"
@@ -140,7 +140,7 @@ class AgIOAutsteer:
 
 if __name__ == '__main__':
     try:
-        mc = MotorController()
+        mc = SteeringController()
         mc.calibrate_center()
 
         agas = AgIOAutsteer(mc)
