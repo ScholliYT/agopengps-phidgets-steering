@@ -8,20 +8,22 @@ from Phidget22.Devices.VoltageInput import VoltageInput
 from Phidget22.Devices.CurrentInput import CurrentInput
 from Phidget22.Devices.Encoder import Encoder
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(name)-15s %(message)s')
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s"
+)
 
-OVERCURRENT_LIMIT = 0.4 # limit max current in ampere the motor may draw
-MAX_STEERING_ANGLE = 45.0 # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
-INVERT_MOTOR_DIR = True # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
-CONTORL_LOOP_FREQUENCY = 50 # Configure the loop frequency of the PI controller in Hz
+OVERCURRENT_LIMIT = 0.4  # limit max current in ampere the motor may draw
+MAX_STEERING_ANGLE = 45.0  # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
+INVERT_MOTOR_DIR = True  # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
+CONTORL_LOOP_FREQUENCY = 50  # Configure the loop frequency of the PI controller in Hz
 
 # Parameters for PI controller
 kp = 0.01
 ki = 0.001
 
+
 class SteeringController:
-    """ Control logic for the steering wheel by interfacing the Phidgets Motor Controller
-    """
+    """Control logic for the steering wheel by interfacing the Phidgets Motor Controller"""
 
     def __init__(self):
         self.logger = logging.getLogger(name="MotorController")
@@ -80,21 +82,27 @@ class SteeringController:
             self.motor.setTargetBrakingStrength(0)
 
         self.logger.info("Closing sensor objects")
-        if self.motor.getIsOpen(): self.motor.close()
-        if self.supply_voltage_sensor.getIsOpen(): self.supply_voltage_sensor.close()
-        if self.current_sensor.getIsOpen(): self.current_sensor.close()
-        if self.encoder.getIsOpen(): self.encoder.close()
+        if self.motor.getIsOpen():
+            self.motor.close()
+        if self.supply_voltage_sensor.getIsOpen():
+            self.supply_voltage_sensor.close()
+        if self.current_sensor.getIsOpen():
+            self.current_sensor.close()
+        if self.encoder.getIsOpen():
+            self.encoder.close()
 
     def motor_attached(self, _):
         self.logger.info("Motor attached!")
         self.motor.setAcceleration(5.0)
-        self.motor.setDataRate(50) # set up to 125.0 Hz
+        self.motor.setDataRate(50)  # set up to 125.0 Hz
         self.motor.setOnErrorHandler(self.error_handler)
 
     def encoder_attach(self, _):
-        self.encoder.setDataRate(100) # set up to 125.0 Hz
-        self.encoder.setPositionChangeTrigger(10) # TODO: set to resonable value (HKT22 has 300 counts per rotation)
-    
+        self.encoder.setDataRate(100)  # set up to 125.0 Hz
+        self.encoder.setPositionChangeTrigger(
+            10
+        )  # TODO: set to resonable value (HKT22 has 300 counts per rotation)
+
     def check_encoder_position(self, _, positionChange, timeChange, indexTriggered):
         # only check if the steering system is active
         if not self.steering_active.is_set():
@@ -107,18 +115,25 @@ class SteeringController:
         max_deg = +1.5 * MAX_STEERING_ANGLE
         current_angle = self.current_angle()
 
-        if min_deg > current_angle or \
-           max_deg < current_angle:
-            self.logger.error("The steering wheel is at %.2f°, which is outside of the acceptable range of %.2f° to %.2f°. Terminating now.", current_angle, min_deg, max_deg)
+        if min_deg > current_angle or max_deg < current_angle:
+            self.logger.error(
+                "The steering wheel is at %.2f°, which is outside of the acceptable range of %.2f° to %.2f°. Terminating now.",
+                current_angle,
+                min_deg,
+                max_deg,
+            )
             self.shutdown()
 
-    
     def motor_detached(self, _):
         self.logger.warning("Motor detached!")
         self.shutdown()
-    
+
     def error_handler(self, _, code, description):
-        self.logger.error("Error with Code '%s' occured. Description: %s", ErrorEventCode.getName(code), str(description))
+        self.logger.error(
+            "Error with Code '%s' occured. Description: %s",
+            ErrorEventCode.getName(code),
+            str(description),
+        )
 
     def on_voltage_change(self, _, voltage):
         self.logger.debug("Voltage: " + str(voltage))
@@ -127,18 +142,22 @@ class SteeringController:
         self.logger.debug("Current: " + str(current))
 
         if current > OVERCURRENT_LIMIT:
-            self.logger.warning("The motor has consumed %.2f amps, exceeding the allowed %.2f amps.", current, OVERCURRENT_LIMIT)
-
+            self.logger.warning(
+                "The motor has consumed %.2f amps, exceeding the allowed %.2f amps.",
+                current,
+                OVERCURRENT_LIMIT,
+            )
 
     def current_angle(self) -> float:
         """
         Returns the current steering wheel angle in degrees.
         It uses the motor's encoder value to calculate the current angle.
         """
-        angle = MAX_STEERING_ANGLE * self.encoder.getPosition() / (self.steering_wheel_full_range//2)
+        angle = (
+            MAX_STEERING_ANGLE * self.encoder.getPosition() / (self.steering_wheel_full_range // 2)
+        )
 
         return angle
-
 
     def delta_angle(self, target_angle: float) -> float:
         return self.current_angle() - target_angle
@@ -164,22 +183,29 @@ class SteeringController:
         self.steering_wheel_full_range: int = self.encoder.getPosition()
         if INVERT_MOTOR_DIR:
             # we expect counter-clockwise rotation of the motor
-            assert self.steering_wheel_full_range < 0, "expected full steering range to be negative"
+            assert (
+                self.steering_wheel_full_range < 0
+            ), "expected full steering range to be negative"
         else:
             # we expect clockwise rotation of the motor
-            assert self.steering_wheel_full_range > 0, "expected full steering range to be positive"
+            assert (
+                self.steering_wheel_full_range > 0
+            ), "expected full steering range to be positive"
         self.logger.info("Total steering wheel range %d", self.steering_wheel_full_range)
 
         input("Press Enter to center steering wheel\n")
-        self.encoder.setPosition(self.steering_wheel_full_range//2)
+        self.encoder.setPosition(self.steering_wheel_full_range // 2)
 
         # Center steering wheel
         start_time = time.time()
         self.steering_active.set()
-        
+
         # wait till we are settled at almost the center or timeout of 5 seconds
-        while self.delta_angle(0) > 2 or abs(self.motor.getVelocity()) > 0.1 or \
-              time.time() - start_time < 5:
+        while (
+            self.delta_angle(0) > 2
+            or abs(self.motor.getVelocity()) > 0.1
+            or time.time() - start_time < 5
+        ):
             continue
 
         self.steering_active.clear()
@@ -188,11 +214,11 @@ class SteeringController:
         self.logger.info("Motor centered with final error of %.2f", self.delta_angle(0))
 
     def control_loop(self) -> None:
-        """ Control the motors velocity using a PI controller
-        Given the target angle (self.target_angle) the controller 
+        """Control the motors velocity using a PI controller
+        Given the target angle (self.target_angle) the controller
         constantly updates the motor's velocity to minimize the error aka. delta_angle.
         """
-        
+
         error = last_error = error_sum = 0.0
         while self.running.is_set():
             if not self.steering_active.is_set():
@@ -218,7 +244,14 @@ class SteeringController:
             velocity = min(velocity, self.motor.getMaxVelocity())
             velocity = max(velocity, -self.motor.getMaxVelocity())
 
-            self.logger.info("Steering from %.2f° to %.2f° with Motor velocity of %.3f and current error %.2f° | error sum %.2f", self.current_angle(), self.target_angle, velocity, error, error_sum)
+            self.logger.info(
+                "Steering from %.2f° to %.2f° with Motor velocity of %.3f and current error %.2f° | error sum %.2f",
+                self.current_angle(),
+                self.target_angle,
+                velocity,
+                error,
+                error_sum,
+            )
             self.motor.setTargetVelocity(velocity)
 
             last_error = error
@@ -226,9 +259,8 @@ class SteeringController:
 
             # limit frequency
             exec_time = time.time() - start_time
-            time.sleep(max(0, 1/CONTORL_LOOP_FREQUENCY - exec_time))
+            time.sleep(max(0, 1 / CONTORL_LOOP_FREQUENCY - exec_time))
             self.logger.debug("Control loop execution time %f", exec_time)
-
 
     def start_manual_input_steering(self):
         self.target_angle = 0.0
@@ -243,13 +275,21 @@ class SteeringController:
 
                     if target_angle > MAX_STEERING_ANGLE:
                         self.target_angle = MAX_STEERING_ANGLE
-                        self.logger.warning("The requested steering angle %.2f is more than the maximal steering angle of %.2f", target_angle, MAX_STEERING_ANGLE)
+                        self.logger.warning(
+                            "The requested steering angle %.2f is more than the maximal steering angle of %.2f",
+                            target_angle,
+                            MAX_STEERING_ANGLE,
+                        )
                     elif target_angle < -MAX_STEERING_ANGLE:
                         self.target_angle = -MAX_STEERING_ANGLE
-                        self.logger.warning("The requested steering angle %.2f is less than the minimal steering angle of %.2f", target_angle, -MAX_STEERING_ANGLE)
+                        self.logger.warning(
+                            "The requested steering angle %.2f is less than the minimal steering angle of %.2f",
+                            target_angle,
+                            -MAX_STEERING_ANGLE,
+                        )
                     else:
                         self.target_angle = target_angle
-                elif cmd.lower() == 'stop':
+                elif cmd.lower() == "stop":
                     break
         except KeyboardInterrupt as _:
             self.logger.info("Stopping steering after receiving a keyboard interrupt")
@@ -257,7 +297,8 @@ class SteeringController:
         self.steering_active.clear()
         self.running.clear()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     try:
         mc = SteeringController()
         mc.calibrate_center()
@@ -267,7 +308,7 @@ if __name__ == '__main__':
         logging.exception("Unhandled Exeception occured")
     finally:
         logging.info("Shutting down")
-        try: 
+        try:
             mc.shutdown()
         except Exception:
             logging.exception("Unhandled Exeception occured in final shutdown")
