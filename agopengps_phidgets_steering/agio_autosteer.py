@@ -11,6 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)-8s %(na
 
 SOURCE_AGIO = 0x7f
 PGN_AUTOSTEER_DATA = 0xfe
+AGIO_NETWORK_IP = '192.168.178.255'
 
 class AgIOAutsteer:
 
@@ -124,7 +125,7 @@ class AgIOAutsteer:
         data.append(self.calc_crc(data))
 
         try:
-            self.client.sendto(bytes(data), ('192.168.178.255',9999))
+            self.client.sendto(bytes(data), (AGIO_NETWORK_IP,9999))
         except Exception:
             self.logger.exception("Unhandled exception while sending AutoSteer data to AgIO")
 
