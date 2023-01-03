@@ -13,7 +13,7 @@ logging.basicConfig(
 
 SOURCE_AGIO = 0x7F
 PGN_AUTOSTEER_DATA = 0xFE
-AGIO_NETWORK_IP = "192.168.178.255"
+AGIO_NETWORK_IP = "192.168.1.255"
 
 
 class AgIOAutsteer:
@@ -21,7 +21,7 @@ class AgIOAutsteer:
         self.logger = logging.getLogger(name="AgIOAutsteer")
 
         assert (
-            mc.steering_wheel_full_range > 0
+            mc.steering_wheel_full_range != 0
         ), "Looks like the steering wheel range is not calibrated"
         self.mc = mc
 
@@ -35,7 +35,7 @@ class AgIOAutsteer:
         self.server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.server.bind(("", 8888))
-        self.server.settimeout(0.1)
+        self.server.settimeout(0.25)
 
         self.server_running = threading.Event()
         self.server_running.set()
@@ -75,7 +75,7 @@ class AgIOAutsteer:
         received_crc = self.calc_crc(data[:-1])
 
         if data_crc != received_crc:
-            self.logger.warning("Received data with invalid crc")
+            self.logger.warning("Received data with invalid crc: %s (got %s, calculated crc: %s)", data, data_crc, received_crc)
             return
 
         # Autosteer data from AgIO
@@ -160,5 +160,9 @@ if __name__ == "__main__":
     except Exception:
         logging.exception("Unhandled Exeception occured")
     finally:
-        agas.shutdown()
+        try:
+            agas.shutdown()
+        except NameError:
+            # maybe agas was not initialized yet
+            pass
         mc.shutdown()
