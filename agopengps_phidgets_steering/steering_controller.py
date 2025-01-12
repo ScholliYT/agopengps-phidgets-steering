@@ -33,7 +33,7 @@ class SteeringController:
         self.motor = DCMotor()
         self.supply_voltage_sensor = VoltageInput()
         self.current_sensor = CurrentInput()
-        self.encoder = Encoder()
+        # self.encoder = Encoder()
         self.voltage_input_was = VoltageInput()
 
         # Set addressing parameters to specify which channel to open (if any)
@@ -44,8 +44,8 @@ class SteeringController:
         self.motor.setOnDetachHandler(self.motor_detached)
         self.supply_voltage_sensor.setOnVoltageChangeHandler(self.on_voltage_change)
         self.current_sensor.setOnCurrentChangeHandler(self.on_current_change)
-        self.encoder.setOnAttachHandler(self.encoder_attach)
-        self.encoder.setOnPositionChangeHandler(self.check_encoder_position)
+        # self.encoder.setOnAttachHandler(self.encoder_attach)
+        # self.encoder.setOnPositionChangeHandler(self.check_encoder_position)
 
         self.voltage_input_was.setChannel(0)
         self.voltage_input_was.setOnAttachHandler(self.voltage_input_was_attached)
@@ -55,7 +55,7 @@ class SteeringController:
         self.motor.openWaitForAttachment(2000)
         self.supply_voltage_sensor.openWaitForAttachment(2000)
         self.current_sensor.openWaitForAttachment(2000)
-        self.encoder.openWaitForAttachment(2000)
+        # self.encoder.openWaitForAttachment(2000)
         self.voltage_input_was.openWaitForAttachment(2000)
 
         # Steering control
@@ -95,8 +95,8 @@ class SteeringController:
             self.supply_voltage_sensor.close()
         if self.current_sensor.getIsOpen():
             self.current_sensor.close()
-        if self.encoder.getIsOpen():
-            self.encoder.close()
+        # if self.encoder.getIsOpen():
+            # self.encoder.close()
 
     def motor_attached(self, _):
         self.logger.info("Motor attached!")
@@ -198,12 +198,12 @@ class SteeringController:
         """
         # first check if we are left or right of the center
         current_voltage = self.voltage_input_was.getVoltage()
-        if current_voltage > self.center_voltage:
+        if (current_voltage > self.center_voltage and not INVERT_MOTOR_DIR) or (current_voltage < self.center_voltage and INVERT_MOTOR_DIR):
             # we are right of the center
-            angle = MAX_STEERING_ANGLE * (current_voltage - self.center_voltage) / (self.right_voltage - self.center_voltage)
+            angle = MAX_STEERING_ANGLE * abs(current_voltage - self.center_voltage) / abs(self.right_voltage - self.center_voltage)
         else:
             # we are left of the center
-            angle = -MAX_STEERING_ANGLE * (self.center_voltage - current_voltage) / (self.center_voltage - self.left_voltage)
+            angle = -MAX_STEERING_ANGLE * abs(self.center_voltage - current_voltage) / abs(self.center_voltage - self.left_voltage)
         
         return angle
 
@@ -230,25 +230,36 @@ class SteeringController:
         input("Turn steering wheel to the left endpoint and press Enter\n")
 
         self.left_voltage = self.voltage_input_was.getVoltage()
-        self.encoder.setPosition(0)
+        # self.encoder.setPosition(0)
         input("Turn steering wheel to the right endpoint and press Enter\n")
 
         self.right_voltage = self.voltage_input_was.getVoltage()
-        self.steering_wheel_full_range: int = self.encoder.getPosition()
+        # self.steering_wheel_full_range: int = self.encoder.getPosition()
+        # self.logger.info("Total steering wheel range %d", self.steering_wheel_full_range)
+        self.logger.info("WAS range %.3f to %.3f (range %.3f)", self.left_voltage, self.right_voltage, self.right_voltage - self.left_voltage)
         if INVERT_MOTOR_DIR:
             # we expect counter-clockwise rotation of the motor
+            # assert (
+            #     self.steering_wheel_full_range < 0
+            # ), "expected full steering range to be negative"
             assert (
-                self.steering_wheel_full_range < 0
-            ), "expected full steering range to be negative"
+                self.left_voltage > self.right_voltage
+            ), "expected left voltage to be larger than right voltage"
+            self.center_voltage = self.right_voltage + (self.left_voltage - self.right_voltage) / 2
+            
         else:
             # we expect clockwise rotation of the motor
+            # assert (
+            #     self.steering_wheel_full_range > 0
+            # ), "expected full steering range to be positive"
             assert (
-                self.steering_wheel_full_range > 0
-            ), "expected full steering range to be positive"
-        self.logger.info("Total steering wheel range %d, WAS range %.3f to %.3f (range %.3f)", self.steering_wheel_full_range, self.left_voltage, self.right_voltage, self.right_voltage - self.left_voltage)
+                self.left_voltage < self.right_voltage
+            ), "expected left voltage to be smaller than right voltage"
+            self.center_voltage = self.left_voltage + (self.right_voltage - self.left_voltage) / 2
 
+        self.logger.info("Center voltage: %.2f", self.center_voltage)
         input("Press Enter to center steering wheel\n")
-        self.encoder.setPosition(self.steering_wheel_full_range // 2)
+        # self.encoder.setPosition(self.steering_wheel_full_range // 2)
 
         # Center steering wheel
         start_time = time.time()
@@ -256,7 +267,7 @@ class SteeringController:
 
         # wait till we are settled at almost the center or timeout of 5 seconds
         while (
-            self.delta_angle(0) > 2
+            self.delta_angle_was(0) > 2.0
             or abs(self.motor.getVelocity()) > 0.1
             or time.time() - start_time < 5
         ):
@@ -264,10 +275,9 @@ class SteeringController:
 
         self.steering_active.clear()
         self.motor.setTargetVelocity(0)
-        self.logger.info("Motor centered with final error of %.2f°", self.delta_angle(0))
+        self.logger.info("Motor centered with final error of %.2f°", self.delta_angle_was(0))
 
-        self.center_voltage = self.voltage_input_was.getVoltage()
-        self.logger.info("Center voltage: %.2f", self.center_voltage)
+        # self.center_voltage = self.voltage_input_was.getVoltage()
 
         # print the center offset from a perfect center
         self.logger.info("Center offset from perfect center: %.3fV", self.center_voltage - (self.left_voltage + self.right_voltage) / 2)
