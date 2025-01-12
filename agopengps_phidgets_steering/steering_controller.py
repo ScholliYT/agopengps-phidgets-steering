@@ -7,6 +7,7 @@ from Phidget22.Devices.DCMotor import DCMotor
 from Phidget22.Devices.VoltageInput import VoltageInput
 from Phidget22.Devices.CurrentInput import CurrentInput
 from Phidget22.Devices.Encoder import Encoder
+from Phidget22.Devices.VoltageInput import VoltageInput
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s"
@@ -15,7 +16,7 @@ logging.basicConfig(
 OVERCURRENT_LIMIT = 0.4  # limit max current in ampere the motor may draw
 MAX_STEERING_ANGLE = 45.0  # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
 INVERT_MOTOR_DIR = True  # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
-CONTORL_LOOP_FREQUENCY = 50  # Configure the loop frequency of the PI controller in Hz
+CONTORL_LOOP_FREQUENCY = 50.0  # Configure the loop frequency of the PI controller in Hz
 
 # Parameters for PI controller
 kp = 0.01
@@ -33,6 +34,7 @@ class SteeringController:
         self.supply_voltage_sensor = VoltageInput()
         self.current_sensor = CurrentInput()
         self.encoder = Encoder()
+        self.voltage_input_was = VoltageInput()
 
         # Set addressing parameters to specify which channel to open (if any)
         self.supply_voltage_sensor.setChannel(2)
@@ -45,11 +47,16 @@ class SteeringController:
         self.encoder.setOnAttachHandler(self.encoder_attach)
         self.encoder.setOnPositionChangeHandler(self.check_encoder_position)
 
+        self.voltage_input_was.setChannel(0)
+        self.voltage_input_was.setOnAttachHandler(self.voltage_input_was_attached)
+        self.voltage_input_was.setOnVoltageChangeHandler(self.voltage_input_was_changed)
+
         # Open your Phidgets and wait for attachment
         self.motor.openWaitForAttachment(2000)
         self.supply_voltage_sensor.openWaitForAttachment(2000)
         self.current_sensor.openWaitForAttachment(2000)
         self.encoder.openWaitForAttachment(2000)
+        self.voltage_input_was.openWaitForAttachment(2000)
 
         # Steering control
         self.target_angle: float = 0.0
@@ -102,6 +109,10 @@ class SteeringController:
         self.encoder.setPositionChangeTrigger(
             10
         )  # TODO: set to resonable value (HKT22 has 300 counts per rotation)
+    
+    def voltage_input_was_attached(self, _):
+        self.voltage_input_was.setDataRate(100)
+        self.voltage_input_was.setVoltageChangeTrigger(0.01)
 
     def check_encoder_position(self, _, positionChange, timeChange, indexTriggered):
         # only check if the steering system is active
@@ -123,6 +134,27 @@ class SteeringController:
                 max_deg,
             )
             self.shutdown()
+
+    def voltage_input_was_changed(self, _, voltage):
+        self.logger.info("WAS Voltage was: " + str(voltage))
+
+        if not self.steering_active.is_set():
+            return
+        
+        # ensur the currnt wheel angle sensor (WAS) reading is in a acceptable range
+        min_voltage = max(0, -1.1*self.left_voltage)
+        max_voltage = min(5.0, 1.1*self.right_voltage)
+        current_voltage = self.voltage_input_was.getVoltage()
+
+        if min_voltage > current_voltage or max_voltage < current_voltage:
+            self.logger.error(
+                "The wheel angle sensor (WAS) voltage is at %.3f V, which is outside of the acceptabl range of %.3f V to %.3f V. Terminating now.",
+                current_voltage,
+                min_voltage,
+                max_voltage
+            )
+            self.shutdown()
+
 
     def motor_detached(self, _):
         self.logger.warning("Motor detached!")
@@ -158,9 +190,29 @@ class SteeringController:
         )
 
         return angle
+    
+    def current_angle_was(self) -> float:
+        """
+        Returns the current steering wheel angle in degrees.
+        It uses the voltage input from the WAS to calculate the current angle.
+        """
+        # first check if we are left or right of the center
+        current_voltage = self.voltage_input_was.getVoltage()
+        if current_voltage > self.center_voltage:
+            # we are right of the center
+            angle = MAX_STEERING_ANGLE * (current_voltage - self.center_voltage) / (self.right_voltage - self.center_voltage)
+        else:
+            # we are left of the center
+            angle = -MAX_STEERING_ANGLE * (self.center_voltage - current_voltage) / (self.center_voltage - self.left_voltage)
+        
+        return angle
 
     def delta_angle(self, target_angle: float) -> float:
         return self.current_angle() - target_angle
+    
+
+    def delta_angle_was(self, target_angle: float) -> float:
+        return self.current_angle_was() - target_angle
 
     def calibrate_center(self):
         """Perform a user guided calibration of the steering wheel.
@@ -177,9 +229,11 @@ class SteeringController:
         self.motor.setTargetBrakingStrength(0.0)
         input("Turn steering wheel to the left endpoint and press Enter\n")
 
+        self.left_voltage = self.voltage_input_was.getVoltage()
         self.encoder.setPosition(0)
         input("Turn steering wheel to the right endpoint and press Enter\n")
 
+        self.right_voltage = self.voltage_input_was.getVoltage()
         self.steering_wheel_full_range: int = self.encoder.getPosition()
         if INVERT_MOTOR_DIR:
             # we expect counter-clockwise rotation of the motor
@@ -191,7 +245,7 @@ class SteeringController:
             assert (
                 self.steering_wheel_full_range > 0
             ), "expected full steering range to be positive"
-        self.logger.info("Total steering wheel range %d", self.steering_wheel_full_range)
+        self.logger.info("Total steering wheel range %d, WAS range %.3f to %.3f (range %.3f)", self.steering_wheel_full_range, self.left_voltage, self.right_voltage, self.right_voltage - self.left_voltage)
 
         input("Press Enter to center steering wheel\n")
         self.encoder.setPosition(self.steering_wheel_full_range // 2)
@@ -210,8 +264,14 @@ class SteeringController:
 
         self.steering_active.clear()
         self.motor.setTargetVelocity(0)
+        self.logger.info("Motor centered with final error of %.2f°", self.delta_angle(0))
 
-        self.logger.info("Motor centered with final error of %.2f", self.delta_angle(0))
+        self.center_voltage = self.voltage_input_was.getVoltage()
+        self.logger.info("Center voltage: %.2f", self.center_voltage)
+
+        # print the center offset from a perfect center
+        self.logger.info("Center offset from perfect center: %.3fV", self.center_voltage - (self.left_voltage + self.right_voltage) / 2)
+
 
     def control_loop(self) -> None:
         """Control the motors velocity using a PI controller
@@ -228,6 +288,8 @@ class SteeringController:
                 continue
 
             start_time = time.time()
+
+            error = self.delta_angle_was(self.target_angle)
 
             # reset integral error on sign flip
             if error * last_error > 0:
@@ -246,7 +308,7 @@ class SteeringController:
 
             self.logger.info(
                 "Steering from %.2f° to %.2f° with Motor velocity of %.3f and current error %.2f° | error sum %.2f",
-                self.current_angle(),
+                self.current_angle_was(),
                 self.target_angle,
                 velocity,
                 error,
@@ -255,12 +317,13 @@ class SteeringController:
             self.motor.setTargetVelocity(velocity)
 
             last_error = error
-            error = self.delta_angle(self.target_angle)
 
             # limit frequency
             exec_time = time.time() - start_time
-            time.sleep(max(0, 1 / CONTORL_LOOP_FREQUENCY - exec_time))
-            self.logger.debug("Control loop execution time %f", exec_time)
+            time.sleep(max(0.0, 1.0 / CONTORL_LOOP_FREQUENCY - exec_time))
+            self.logger.debug("Control loop execution time %f s", exec_time)
+            if exec_time > 1.0 / CONTORL_LOOP_FREQUENCY:
+                self.logger.warning("Control loop execution time (%.3f s) is larger then Control loop frequency (%.2f Hz)", exec_time, CONTORL_LOOP_FREQUENCY)
 
     def start_manual_input_steering(self):
         self.target_angle = 0.0

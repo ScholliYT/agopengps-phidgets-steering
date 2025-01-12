@@ -107,7 +107,7 @@ class AgIOAutsteer:
         heading = roll = switch = 0
 
         while True:
-            wheel_angle = mc.current_angle()
+            wheel_angle = mc.current_angle_was()
             pwm_display = abs(mc.motor.getVelocity())
             self.send_from_autosteer(wheel_angle, heading, roll, switch, int(pwm_display * 255))
             time.sleep(1 / 5)

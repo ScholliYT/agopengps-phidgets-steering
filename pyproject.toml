@@ -7,8 +7,8 @@ readme = "README.md"
 packages = [{include = "agopengps_phidgets_steering"}]
 
 [tool.poetry.dependencies]
-python = "^3.10,<3.12"
-phidget22 = "^1.12"
+python = "^3.10,<3.14"
+phidget22 = "^1.22"
 pyside6 = "^6.4.1"
 
 
