@@ -85,11 +85,21 @@ class AgIOAutsteer:
                 self.logger.exception("Timeout error reading UDP data from AgIO")
             except socket.error as e:
                 self.logger.exception("Error reading UDP data from AgIO")
+        self.logger.info("Exiting server loop")
 
     def decode_data(self, data, src_ip: str, src_port: int) -> None:
         data_source = data[2]
         pgn_id = data[3]
         payload_length = data[4]
+
+        if len(data) - 6 != payload_length:
+            self.logger.warning(
+                "Received data with invalid length: %s (expected %d, got %d)",
+                data,
+                payload_length,
+                len(data) - 6,
+            )
+            return
 
         received_crc = data[-1]
         calculated_crc = self.calc_crc(data[:-1])
@@ -185,7 +195,7 @@ class AgIOAutsteer:
         data.extend(list(struct.pack("<h", wheel_angle_int)))
 
         # two bytes of counts, not used
-        # TODO: figoure out if we need to come up with some value here
+        # TODO: figure out if we need to come up with some value here
         wheel_angle_adc_counts = 0
         data.extend(list(struct.pack("<h", wheel_angle_adc_counts)))
 
