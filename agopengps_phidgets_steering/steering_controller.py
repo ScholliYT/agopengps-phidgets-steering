@@ -174,9 +174,6 @@ class SteeringController:
 
         return angle
 
-    def delta_angle(self, target_angle: float) -> float:
-        return self.current_angle() - target_angle
-
     def delta_angle_was(self, target_angle: float) -> float:
         return self.current_angle_was() - target_angle
 
