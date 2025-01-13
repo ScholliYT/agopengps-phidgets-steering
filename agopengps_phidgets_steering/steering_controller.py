@@ -13,7 +13,7 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s"
 )
 
-OVERCURRENT_LIMIT = 0.4  # limit max current in ampere the motor may draw
+OVERCURRENT_LIMIT = 2.4  # limit max current in ampere the motor may draw
 MAX_STEERING_ANGLE = 45.0  # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
 INVERT_MOTOR_DIR = True  # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
 CONTORL_LOOP_FREQUENCY = 50.0  # Configure the loop frequency of the PI controller in Hz
@@ -43,13 +43,13 @@ class SteeringController:
         self.motor.setOnAttachHandler(self.motor_attached)
         self.motor.setOnDetachHandler(self.motor_detached)
         self.supply_voltage_sensor.setOnVoltageChangeHandler(self.on_voltage_change)
-        self.current_sensor.setOnCurrentChangeHandler(self.on_current_change)
+        #self.current_sensor.setOnCurrentChangeHandler(self.on_current_change)
         # self.encoder.setOnAttachHandler(self.encoder_attach)
         # self.encoder.setOnPositionChangeHandler(self.check_encoder_position)
 
         self.voltage_input_was.setChannel(0)
         self.voltage_input_was.setOnAttachHandler(self.voltage_input_was_attached)
-        self.voltage_input_was.setOnVoltageChangeHandler(self.voltage_input_was_changed)
+        #self.voltage_input_was.setOnVoltageChangeHandler(self.voltage_input_was_changed)
 
         # Open your Phidgets and wait for attachment
         self.motor.openWaitForAttachment(2000)

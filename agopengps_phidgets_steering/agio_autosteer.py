@@ -20,9 +20,9 @@ class AgIOAutsteer:
     def __init__(self, mc: SteeringController):
         self.logger = logging.getLogger(name="AgIOAutsteer")
 
-        assert (
-            mc.steering_wheel_full_range != 0
-        ), "Looks like the steering wheel range is not calibrated"
+        # assert (
+        #     mc.steering_wheel_full_range != 0
+        # ), "Looks like the steering wheel range is not calibrated"
         self.mc = mc
 
         # Client to send messages back to AgIO
@@ -107,10 +107,10 @@ class AgIOAutsteer:
         heading = roll = switch = 0
 
         while True:
-            wheel_angle = mc.current_angle_was()
-            pwm_display = abs(mc.motor.getVelocity())
+            wheel_angle = self.mc.current_angle_was()
+            pwm_display = abs(self.mc.motor.getVelocity())
             self.send_from_autosteer(wheel_angle, heading, roll, switch, int(pwm_display * 255))
-            time.sleep(1 / 5)
+            time.sleep(1.0 / 5.0)
 
     def send_from_autosteer(
         self, wheel_angle: float, heading: float, roll: float, steer_switch: int, pwm_display: int
