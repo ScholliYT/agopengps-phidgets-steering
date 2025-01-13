@@ -11,18 +11,38 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s"
 )
 
+# These are some magic numbers that AgIO uses to identify the data it sends and receives
+# A reference can be found in the AgIO source code and documentation
+# look at: https://github.com/AgOpenGPS-Official/Boards/blob/main/PGN.md
 SOURCE_AGIO = 0x7F
-PGN_AUTOSTEER_DATA = 0xFE
-AGIO_NETWORK_IP = "192.168.1.255"
+SOURCE_AUTOSTEER = 0x7E  # this is us, the autosteer controller
+
+# packets coming from AgIO
+PGN_AUTOSTEER_DATA = 0xFE  # 254
+PGN_STEER_SETTINGS = 0xFC  # 252
+PGN_STEER_CONFIG = 0xFB  # 251
+PGN_HELLO_REQUEST = 0xC8  # 200
+# PGN_SUBNET_SET = 0xC9 # 201
+PGN_SUBNET_SCAN_REQUEST = 0xCA  # 202
+PGN_SUBNET_SCAN_REPLY = 0xCB  # 203
+
+# packets going to AgIO
+PGN_DATA_FROM_AUTOSTEER = (
+    0xFD  # this is what we send back to AgIO, containing the actual steering angle
+)
+PGN_HELLO_REPLY_STEERING_1 = 0x7E  # AngleLo	AngleHi	CountsLo	CountsHi	Switchbyte  CRC
+PGN_HELLO_REPLY_STEERING_2 = 0x7B  # relayLo	relayHi	*	        *	        *	        CRC
+
+
+AGIO_NETWORK_IP = "192.168.5.255"
+AGIO_RECEIVE_PORT = 9999  # Port that AgIO listens on
+WAS_REPORTING_FREQUENCY = 40.0  # Hz
 
 
 class AgIOAutsteer:
     def __init__(self, mc: SteeringController):
         self.logger = logging.getLogger(name="AgIOAutsteer")
 
-        # assert (
-        #     mc.steering_wheel_full_range != 0
-        # ), "Looks like the steering wheel range is not calibrated"
         self.mc = mc
 
         # Client to send messages back to AgIO
@@ -58,28 +78,37 @@ class AgIOAutsteer:
         while self.server_running.is_set():
             try:
                 while self.server_running.is_set():
-                    (data, address) = self.server.recvfrom(1024)
+                    (data, (src_ip, src_port)) = self.server.recvfrom(1024)
                     if data[0] == 0x80 and data[1] == 0x81:
-                        self.decode_data(data)
+                        self.decode_data(data, src_ip, src_port)
             except socket.timeout as e:
-                self.logger.error("Timeout error reading UDP data from AgIO", exc_info=e)
+                self.logger.exception("Timeout error reading UDP data from AgIO")
             except socket.error as e:
-                self.logger.error("Error reading UDP data from AgIO", exc_info=e)
+                self.logger.exception("Error reading UDP data from AgIO")
 
-    def decode_data(self, data) -> None:
+    def decode_data(self, data, src_ip: str, src_port: int) -> None:
         data_source = data[2]
         pgn_id = data[3]
         payload_length = data[4]
 
-        data_crc = data[-1]
-        received_crc = self.calc_crc(data[:-1])
+        received_crc = data[-1]
+        calculated_crc = self.calc_crc(data[:-1])
 
-        if data_crc != received_crc:
-            self.logger.warning("Received data with invalid crc: %s (got %s, calculated crc: %s)", data, data_crc, received_crc)
+        if received_crc != calculated_crc:
+            self.logger.warning(
+                "Received data with invalid crc: %s (got %s, calculated crc: %s)",
+                data,
+                received_crc,
+                calculated_crc,
+            )
+            return
+
+        if data_source != SOURCE_AGIO:
+            self.logger.info("Received data from unknown source %d", data_source)
             return
 
         # Autosteer data from AgIO
-        if data_source == SOURCE_AGIO and pgn_id == PGN_AUTOSTEER_DATA:
+        if pgn_id == PGN_AUTOSTEER_DATA:
             payload = data[5:-1]
             unpacked_payload = {
                 "Speed": struct.unpack("<H", payload[0:2])[0] / 10.0,
@@ -102,6 +131,75 @@ class AgIOAutsteer:
             elif self.mc.steering_active.is_set() and not unpacked_payload["AutosteerActive"]:
                 self.logger.info("Deactivating motor for auto steering")
                 self.mc.steering_active.clear()
+        elif pgn_id == PGN_HELLO_REQUEST:
+            self.logger.info("Received Hello request from AgIO")
+            self.send_hello_reply_steering()
+        elif pgn_id == PGN_SUBNET_SCAN_REQUEST:
+            self.logger.info("Received Subnet Scan request from AgIO")
+            self.send_subnet_scan_reply(src_ip, src_port)
+
+    def send_subnet_scan_reply(self, src_ip: str, src_port: int) -> None:
+        """Send "Subnet Scan Reply" PGN to AgIO"""
+        self.logger.info("Sending Subnet Scan Reply to AgIO")
+        # uint8_t scanReply[] = { 128, 129, 126, 203, 7,
+        #               networkAddress.ipOne, networkAddress.ipTwo, networkAddress.ipThree, 126,
+        #               src_ip[0], src_ip[1], src_ip[2], checksum };
+        # TODO: figure out why they use 126 as the fixed ip of the Autosteer controller. It is the same as the PGN source identifier but should not be required here.
+        data = bytearray([0x80, 0x81, SOURCE_AUTOSTEER, PGN_SUBNET_SCAN_REPLY, 0x07])
+
+        # network address
+        network_address = self.server.getsockname()[0].split(".")
+        assert len(network_address) == 4, "Expected 4 octets in a IPv4 address"
+        data.extend([int(x) for x in network_address])
+
+        # source ip
+        src_ip_octets = src_ip.split(".")
+        assert len(src_ip_octets) == 4, "Expected 4 octets in a IPv4 address"
+        data.extend([int(x) for x in src_ip_octets[:3]])
+
+        # print a warning if the source ip is not on the same subnet as the configured AGIO_NETWORK_IP
+        if src_ip_octets[:3] != AGIO_NETWORK_IP.split(".")[:3]:
+            self.logger.warning(
+                "Source IP %s is not on the same subnet as AGIO_NETWORK_IP %s. This utility may not work as expected.",
+                src_ip,
+                AGIO_NETWORK_IP,
+            )
+
+        # checksum
+        data.append(self.calc_crc(data))
+
+        try:
+            self.client.sendto(bytes(data), (AGIO_NETWORK_IP, AGIO_RECEIVE_PORT))
+        except Exception:
+            self.logger.exception("Unhandled exception while sending Subnet Scan Reply to AgIO")
+
+    def send_hello_reply_steering(self) -> None:
+        """Send "Hello Reply Steering" PGN to AgIO"""
+        self.logger.info("Sending Hello Reply from AutoSteering to AgIO")
+        # uint8_t helloFromAutoSteer[] = { 128, 129, 126, 126, 5, 0, 0, 0, 0, 0, 71 };
+        data = bytearray([0x80, 0x81, SOURCE_AUTOSTEER, PGN_HELLO_REPLY_STEERING_1, 0x05])
+
+        # two bytes of steering angle multiplied by 100
+        wheel_angle = self.mc.current_angle_was()
+        wheel_angle_int = int(wheel_angle * 100)
+        data.extend(list(struct.pack("<h", wheel_angle_int)))
+
+        # two bytes of counts, not used
+        # TODO: figoure out if we need to come up with some value here
+        wheel_angle_adc_counts = 0
+        data.extend(list(struct.pack("<h", wheel_angle_adc_counts)))
+
+        # switch byte, not used
+        switch_byte = 0
+        data.append(switch_byte)
+
+        # crc is fixed to 71 for whatever reason
+        data.append(71)
+
+        try:
+            self.client.sendto(bytes(data), (AGIO_NETWORK_IP, AGIO_RECEIVE_PORT))
+        except Exception:
+            self.logger.exception("Unhandled exception while sending Hello Reply Steering to AgIO")
 
     def report_actual_steering_data(self) -> None:
         heading = roll = switch = 0
@@ -110,7 +208,7 @@ class AgIOAutsteer:
             wheel_angle = self.mc.current_angle_was()
             pwm_display = abs(self.mc.motor.getVelocity())
             self.send_from_autosteer(wheel_angle, heading, roll, switch, int(pwm_display * 255))
-            time.sleep(1.0 / 5.0)
+            time.sleep(1.0 / WAS_REPORTING_FREQUENCY)
 
     def send_from_autosteer(
         self, wheel_angle: float, heading: float, roll: float, steer_switch: int, pwm_display: int
@@ -120,7 +218,8 @@ class AgIOAutsteer:
             "Sending data from AutoSteer to AgIO containing wheel_angle %.2f", wheel_angle
         )
 
-        data = bytearray([0x80, 0x81, 0x7E, 0xFD, 0x08])
+        # the data format is
+        data = bytearray([0x80, 0x81, SOURCE_AUTOSTEER, PGN_DATA_FROM_AUTOSTEER, 0x08])
         wheel_angle_int = int(wheel_angle * 100)
         data.extend(list(struct.pack("<h", wheel_angle_int)))
         heading_int = int(heading * 10)
@@ -134,12 +233,15 @@ class AgIOAutsteer:
         data.append(self.calc_crc(data))
 
         try:
-            self.client.sendto(bytes(data), (AGIO_NETWORK_IP, 9999))
+            self.client.sendto(bytes(data), (AGIO_NETWORK_IP, AGIO_RECEIVE_PORT))
         except Exception:
             self.logger.exception("Unhandled exception while sending AutoSteer data to AgIO")
 
     def calc_crc(self, data):
-        """return the "crc" byte of data"""
+        """return the "crc" byte of data
+
+        The crc is calculated by summing all bytes (excluding the first two) and taking the modulo 256 of the sum
+        """
         crc = 0
         for byte in data[2:]:
             crc += byte
