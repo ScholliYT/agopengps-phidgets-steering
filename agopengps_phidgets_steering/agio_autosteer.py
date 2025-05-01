@@ -27,9 +27,9 @@ PGN_SUBNET_SCAN_REQUEST = 0xCA  # 202
 PGN_SUBNET_SCAN_REPLY = 0xCB  # 203
 
 # packets going to AgIO
-PGN_DATA_FROM_AUTOSTEER = (
-    0xFD  # this is what we send back to AgIO, containing the actual steering angle
-)
+# this is what we send back to AgIO, containing the actual steering angle
+PGN_DATA_FROM_AUTOSTEER = 0xFD  # 253
+PGN_DATA_FROM_AUTOSTEER_2 = 0xFA  # 250
 PGN_HELLO_REPLY_STEERING_1 = 0x7E  # AngleLo	AngleHi	CountsLo	CountsHi	Switchbyte  CRC
 PGN_HELLO_REPLY_STEERING_2 = 0x7B  # relayLo	relayHi	*	        *	        *	        CRC
 
@@ -218,7 +218,36 @@ class AgIOAutsteer:
             wheel_angle = self.mc.current_angle_was()
             pwm_display = abs(self.mc.motor.getVelocity())
             self.send_from_autosteer(wheel_angle, heading, roll, switch, int(pwm_display * 255))
+
+            # report the current consumption of the motor
+            current_amps = self.mc.current_sensor.getCurrent()
+            if current_amps is not None:
+                self.logger.info("Motor current consumption: %.2f A", current_amps)
+                sensor_value = int(current_amps * 10)  # convert to 0.1 A interval with 0-100 range
+                self.send_sensor_value_from_autosteer(sensor_value)
+
             time.sleep(1.0 / WAS_REPORTING_FREQUENCY)
+
+    def send_sensor_value_from_autosteer(self, sensor_value: int) -> None:
+        """Send sensor value from AutoSteer to AgIO"""
+        self.logger.info(
+            "Sending sensor value from AutoSteer to AgIO containing sensor_value %.2f",
+            sensor_value,
+        )
+
+        # the data format is 8 payload bytes and the first payload byte is the sensor value
+        data = bytearray([0x80, 0x81, SOURCE_AUTOSTEER, PGN_DATA_FROM_AUTOSTEER_2, 0x08])
+        data.append(sensor_value)
+        # the rest of the payload is not used, so we fill it with 0
+        for _ in range(7):
+            data.append(0)
+
+        data.append(self.calc_crc(data))
+
+        try:
+            self.client.sendto(bytes(data), (AGIO_NETWORK_IP, AGIO_RECEIVE_PORT))
+        except Exception:
+            self.logger.exception("Unhandled exception while sending sensor value to AgIO")
 
     def send_from_autosteer(
         self, wheel_angle: float, heading: float, roll: float, steer_switch: int, pwm_display: int
