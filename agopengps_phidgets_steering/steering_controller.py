@@ -1,6 +1,10 @@
+from dataclasses import dataclass
+import dataclasses
+import os
 import time
 import logging
 import threading
+import yaml
 
 from Phidget22.ErrorEventCode import ErrorEventCode
 from Phidget22.Devices.DCMotor import DCMotor
@@ -8,26 +12,20 @@ from Phidget22.Devices.VoltageInput import VoltageInput
 from Phidget22.Devices.CurrentInput import CurrentInput
 from Phidget22.Devices.VoltageInput import VoltageInput
 
+from agopengps_phidgets_steering.steering_controller_config import SteeringControllerConfig
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-8s %(name)-15s %(message)s"
 )
-
-OVERCURRENT_LIMIT = 2.4  # limit max current in ampere the motor may draw
-MAX_STEERING_ANGLE = 45.0  # max angle you can turn the steering wheels (from -MAX_STEERING_ANGLE to +MAX_STEERING_ANGLE)
-INVERT_MOTOR_DIR = True  # Set to True if you want to invert the rotation of the motor (if you mount the motor from the bottom)
-INVERT_WAS_DIR = True
-CONTORL_LOOP_FREQUENCY = 50.0  # Configure the loop frequency of the PI controller in Hz
-
-# Parameters for PI controller
-kp = 0.01
-ki = 0.001
 
 
 class SteeringController:
     """Control logic for the steering wheel by interfacing the Phidgets Motor Controller"""
 
-    def __init__(self):
+    def __init__(self, config: SteeringControllerConfig):
         self.logger = logging.getLogger(name="MotorController")
+
+        self.config = config
 
         # Create your Phidget channels
         self.motor = DCMotor()
@@ -141,11 +139,11 @@ class SteeringController:
     def on_current_change(self, _, current: float):
         self.logger.debug("Current: " + str(current))
 
-        if current > OVERCURRENT_LIMIT:
+        if current > self.config.overcurrent_limit_amps:
             self.logger.warning(
                 "The motor has consumed %.2f amps, exceeding the allowed %.2f amps.",
                 current,
-                OVERCURRENT_LIMIT,
+                self.config.overcurrent_limit_amps,
             )
 
     def current_angle_was(self) -> float:
@@ -155,19 +153,19 @@ class SteeringController:
         """
         # first check if we are left or right of the center
         current_voltage = self.voltage_input_was.getVoltage()
-        if (current_voltage > self.center_voltage and not INVERT_WAS_DIR) or (
-            current_voltage < self.center_voltage and INVERT_WAS_DIR
+        if (current_voltage > self.center_voltage and not self.config.invert_was_dir) or (
+            current_voltage < self.center_voltage and self.config.invert_was_dir
         ):
             # we are right of the center
             angle = (
-                MAX_STEERING_ANGLE
+                self.config.calibration_steering_angle_deg
                 * abs(current_voltage - self.center_voltage)
                 / abs(self.right_voltage - self.center_voltage)
             )
         else:
             # we are left of the center
             angle = (
-                -MAX_STEERING_ANGLE
+                -self.config.calibration_steering_angle_deg
                 * abs(self.center_voltage - current_voltage)
                 / abs(self.center_voltage - self.left_voltage)
             )
@@ -202,7 +200,7 @@ class SteeringController:
             self.right_voltage,
             self.right_voltage - self.left_voltage,
         )
-        if INVERT_WAS_DIR:
+        if self.config.invert_was_dir:
 
             assert (
                 self.left_voltage > self.right_voltage
@@ -267,9 +265,9 @@ class SteeringController:
             else:
                 error_sum = 0
 
-            velocity = (-1) * (kp * error + ki * error_sum)
+            velocity = (-1) * (self.config.kp * error + self.config.ki * error_sum)
 
-            if INVERT_MOTOR_DIR:
+            if self.config.invert_motor_dir:
                 velocity *= -1
 
             # limit to max velocity (i.e. -1 to +1)
@@ -290,13 +288,13 @@ class SteeringController:
 
             # limit frequency
             exec_time = time.time() - start_time
-            time.sleep(max(0.0, 1.0 / CONTORL_LOOP_FREQUENCY - exec_time))
+            time.sleep(max(0.0, 1.0 / self.config.control_loop_frequency_hz - exec_time))
             self.logger.debug("Control loop execution time %f s", exec_time)
-            if exec_time > 1.0 / CONTORL_LOOP_FREQUENCY:
+            if exec_time > 1.0 / self.config.control_loop_frequency_hz:
                 self.logger.warning(
                     "Control loop execution time (%.3f s) is larger then Control loop frequency (%.2f Hz)",
                     exec_time,
-                    CONTORL_LOOP_FREQUENCY,
+                    self.config.control_loop_frequency_hz,
                 )
 
     def start_manual_input_steering(self):
@@ -310,19 +308,19 @@ class SteeringController:
                 if cmd.lstrip("+-").isdecimal():
                     target_angle = float(cmd)
 
-                    if target_angle > MAX_STEERING_ANGLE:
-                        self.target_angle = MAX_STEERING_ANGLE
+                    if target_angle > self.config.calibration_steering_angle_deg:
+                        self.target_angle = self.config.calibration_steering_angle_deg
                         self.logger.warning(
                             "The requested steering angle %.2f is more than the maximal steering angle of %.2f",
                             target_angle,
-                            MAX_STEERING_ANGLE,
+                            self.config.calibration_steering_angle_deg,
                         )
-                    elif target_angle < -MAX_STEERING_ANGLE:
-                        self.target_angle = -MAX_STEERING_ANGLE
+                    elif target_angle < -self.config.calibration_steering_angle_deg:
+                        self.target_angle = -self.config.calibration_steering_angle_deg
                         self.logger.warning(
                             "The requested steering angle %.2f is less than the minimal steering angle of %.2f",
                             target_angle,
-                            -MAX_STEERING_ANGLE,
+                            -self.config.calibration_steering_angle_deg,
                         )
                     else:
                         self.target_angle = target_angle
@@ -336,8 +334,23 @@ class SteeringController:
 
 
 if __name__ == "__main__":
+    # read the sterring controller config from a yaml file if it exists, otherwise use the default values and create the file
+    config = SteeringControllerConfig()
     try:
-        mc = SteeringController()
+        if not os.path.exists("steering_controller_config.yaml"):
+            with open("steering_controller_config.yaml", "w") as f:
+                f.write(config.to_yaml())
+            logging.info("Created default steering controller config file")
+        else:
+            with open("steering_controller_config.yaml", "r") as f:
+                config = SteeringControllerConfig.from_yaml(f.read())
+            logging.info("Loaded steering controller config file")
+        logging.info("Steering controller config: %s", config)
+    except Exception as e:
+        logging.exception("Failed to load steering controller config file. Using default values.")
+
+    try:
+        mc = SteeringController(config=config)
         mc.calibrate_center()
         time.sleep(2)
         mc.start_manual_input_steering()

@@ -1,0 +1,9 @@
+calibration_steering_angle_deg: 35.0
+control_loop_frequency_hz: 50.0
+invert_motor_dir: true
+invert_was_dir: true
+ki: 0.001
+kp: 0.01
+left_endpoint_voltage: 0.1
+overcurrent_limit_amps: 2.5
+right_endpoint_voltage: 0.0

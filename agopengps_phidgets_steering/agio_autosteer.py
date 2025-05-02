@@ -141,6 +141,49 @@ class AgIOAutsteer:
             elif self.mc.steering_active.is_set() and not unpacked_payload["AutosteerActive"]:
                 self.logger.info("Deactivating motor for auto steering")
                 self.mc.steering_active.clear()
+        elif pgn_id == PGN_STEER_SETTINGS:
+            # gainP(1,uint8_t)	highPWM(1,uint8_t)	lowPWM(1,uint8_t)	minPWM(1,uint8_t)	countsPerDeg(2)	steerOffset(2)	ackermanFix(1)
+            payload = data[5:-1]
+            unpacked_payload = {
+                "gainP": struct.unpack("<B", payload[0:1])[0],
+                "highPWM": struct.unpack("<B", payload[1:2])[0],
+                "lowPWM": struct.unpack("<B", payload[2:3])[0],
+                "minPWM": struct.unpack("<B", payload[3:4])[0],
+                "countsPerDeg": struct.unpack("<H", payload[4:6])[0],
+                # steerSettings.wasOffset |= (Serial.read() << 8);  //read was zero offset Lo
+                "steerOffset": struct.unpack("<H", payload[6:8])[0],
+                # convert ackermanFix to percentage
+                "ackermanFix": struct.unpack("<B", payload[8:9])[0] / 100.0,
+            }
+            self.logger.info(
+                "Received AutoSteer settings from AgIO containing { gainP %d, highPWM %d, lowPWM %d, minPWM %d, countsPerDeg %d, steerOffset %d, ackermanFix %.2f }",
+                unpacked_payload["gainP"],
+                unpacked_payload["highPWM"],
+                unpacked_payload["lowPWM"],
+                unpacked_payload["minPWM"],
+                unpacked_payload["countsPerDeg"],
+                unpacked_payload["steerOffset"],
+                unpacked_payload["ackermanFix"],
+            )
+
+        elif pgn_id == PGN_STEER_CONFIG:
+            payload = data[5:-1]
+            unpacked_payload = {
+                "InvertWAS": payload[0] & 0x01,
+                "IsRelayActiveHigh": (payload[0] >> 1) & 0x01,
+                "MotorDriveDirection": (payload[0] >> 2) & 0x01,
+                "SingleInputWAS": (payload[0] >> 3) & 0x01,
+                "CytronDriver": (payload[0] >> 4) & 0x01,
+                "SteerSwitch": (payload[0] >> 5) & 0x01,
+                "SteerButton": (payload[0] >> 6) & 0x01,
+                "ShaftEncoder": (payload[0] >> 7) & 0x01,
+                "PulseCountMax": payload[1],
+                "IsDanfoss": (payload[2] >> 0) & 0x01,
+                "PressureSensor": (payload[2] >> 1) & 0x01,
+                "CurrentSensor": (payload[2] >> 2) & 0x01,
+                "IsUseY_Axis": (payload[2] >> 3) & 0x01,
+            }
+
         elif pgn_id == PGN_HELLO_REQUEST:
             self.logger.info("Received Hello request from AgIO")
             self.send_hello_reply_steering()
@@ -290,6 +333,8 @@ class AgIOAutsteer:
 
 if __name__ == "__main__":
     try:
+        steering_config = SteeringControllerConfig()
+
         mc = SteeringController()
         mc.calibrate_center()
 
